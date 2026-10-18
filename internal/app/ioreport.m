@@ -2902,9 +2902,10 @@ typedef struct IONVMeSMARTInterface {
 
 
 static void readNVMeSMARTTemps(void) {
-  // Use local storage — only update global cache if we get results.
-  // This preserves cached data when the SMART plugin intermittently fails
-  // (common on Apple Silicon embedded NVMe where the user client is unstable).
+  // Publish only successful reads from this attempt. Do not keep an old
+  // temperature indefinitely when a drive disappears or its SMART read fails.
+  g_nvme_temp_count = 0;
+  g_nvme_smart_active = 0;
   temp_sensor_t localTemps[16];
   int localCount = 0;
 
@@ -2976,12 +2977,12 @@ static void readNVMeSMARTTemps(void) {
       IONVMeSMARTInterface **smartInterface = NULL;
       HRESULT res = (*plugin)->QueryInterface(plugin,
           CFUUIDGetUUIDBytes(smartInterfaceID), (LPVOID *)&smartInterface);
-      (*plugin)->Release(plugin);
-
       if (res == S_OK && smartInterface) {
         readResult = (*smartInterface)->SMARTReadData(smartInterface, &smartData);
         (*smartInterface)->Release(smartInterface);
       }
+      // Stop closes the exclusive SMART user client; Release alone leaks it.
+      IODestroyPlugInInterface(plugin);
     }
 
     IOObjectRelease(svc);
@@ -3005,13 +3006,9 @@ static void readNVMeSMARTTemps(void) {
   }
   IOObjectRelease(iter);
 
-  // Only update global cache if we got results.
-  // If all reads failed, preserve previous cached data.
-  if (localCount > 0) {
-    memcpy(g_nvme_temps, localTemps, localCount * sizeof(temp_sensor_t));
-    g_nvme_temp_count = localCount;
-    g_nvme_smart_active = 1;
-  }
+  memcpy(g_nvme_temps, localTemps, localCount * sizeof(temp_sensor_t));
+  g_nvme_temp_count = localCount;
+  g_nvme_smart_active = (localCount > 0);
 }
 
 // --- ANE activity fallback via IORegistry power state -----------------------
