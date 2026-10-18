@@ -4053,6 +4053,14 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   // Otherwise fall back to SMC (with category-aware 10°C threshold).
   // This prevents M2 Max's incomplete/garbage HID from replacing good SMC data.
 
+  static int smcTempTick = 0;
+  int refreshSlowSensors = (smcTempTick % 5 == 0);  // Refresh every 5th tick
+  smcTempTick++;
+
+  if (refreshSlowSensors) {
+    readNVMeSMARTTemps();
+  }
+
   // Step 1: Read HID per-core sensors and get per-category counts
   temp_sensor_t hidSensors[64];
   int hidEcount = 0, hidPcount = 0, hidScount = 0, hidGPUcount = 0;
@@ -4134,9 +4142,6 @@ PowerMetrics samplePowerMetrics(int durationMs) {
   // Step 4: Add SMC sensors, skipping categories already covered by HID.
   // Tiered caching: slow-changing sensors (Ambient, Board, SSD, VRM, etc.)
   // are only read from SMC every 5th tick to reduce IPC overhead.
-  static int smcTempTick = 0;
-  int refreshSlowSensors = (smcTempTick % 5 == 0);  // Refresh every 5th tick
-  smcTempTick++;
 
   for (int i = 0; i < g_all_temp_sensor_count && validSensorCount < 512; i++) {
     char k1 = g_all_temp_sensors[i].key[1];
@@ -4180,9 +4185,6 @@ PowerMetrics samplePowerMetrics(int durationMs) {
 
   // Step 5: Append NVMe SMART temperatures.
   // Uses the same slow-sensor tick as SMC environmental sensors.
-  if (refreshSlowSensors) {
-    readNVMeSMARTTemps();
-  }
   for (int i = 0; i < g_nvme_temp_count && validSensorCount < 512; i++) {
     metrics.temps[validSensorCount++] = g_nvme_temps[i];
   }
